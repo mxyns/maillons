@@ -1,0 +1,2 @@
+for file in tools/profiler/*.pprof; do go tool pprof -raw -output="${file}.raw" "$1" "$file"; done
+for file in tools/profiler/*.raw; do ./tools/stackcollapse-go.pl "$file" | ./tools/flamegraph.pl > "${file}.svg"; done
