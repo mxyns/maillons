@@ -1,4 +1,4 @@
-module maillons
+module github.com/mxyns/maillons
 
 go 1.19
 
