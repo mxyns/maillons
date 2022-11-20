@@ -2,8 +2,12 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
+	"github.com/bygui86/multi-profile/v2"
 	"log"
+	"math"
+	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,8 +24,6 @@ type Task interface {
 }
 
 type WorkContext interface {
-
-	/* Getters */
 	Name() string
 	Workers() []Worker
 	WorkerGroup() *sync.WaitGroup
@@ -30,7 +32,6 @@ type WorkContext interface {
 	Increment()
 	Count() uint64
 
-	/* Setters */
 	SetName(newValue string)
 	SetWorkers(newValue []Worker)
 	SetWorkerGroup(newValue *sync.WaitGroup)
@@ -258,11 +259,50 @@ func (c CollectTask) Process(ctx WorkContext) {
 	}
 }
 
+var inputDirFlag = flag.String("input", "./input", "input directory")
+var outputFilePathFlag = flag.String("output", "./result.out", "output file location")
+var statsFlag = flag.Bool("stats", false, "true to print statistics at the end")
+var verboseFlag = flag.Bool("verbose", false, "true to print status")
+var profilerOutputPathFlag = flag.String("profile", "", "set profiler output directory to profile program, leave blank for no profiling")
+
 func main() {
+
+	flag.Parse()
+	var inputDir string = *inputDirFlag
+	var stats bool = *statsFlag
+	var verbose bool = *verboseFlag
+	var profilerOutputPath string = *profilerOutputPathFlag
+	var outputFilePath string = *outputFilePathFlag
+
+	outputFile, err := os.OpenFile(outputFilePath, os.O_CREATE|os.O_WRONLY, os.ModePerm)
+	if err != nil {
+		log.Fatalf("error opening output file! err %v", err)
+		return
+	}
+
+	defer func(outputFile *os.File) {
+		err = outputFile.Close()
+		if err != nil {
+			log.Fatalf("error closing output file! err %v", err)
+		}
+	}(outputFile)
+
+	if profilerOutputPath != "" {
+		conf := &profile.Config{
+			Path:           profilerOutputPath,
+			MemProfileType: profile.DefaultMemProfileType,
+		}
+		defer profile.CPUProfile(conf).Start().Stop()
+		defer profile.MutexProfile(conf).Start().Stop()
+		defer profile.TraceProfile(conf).Start().Stop()
+		defer profile.MemProfile(conf).Start().Stop()
+		defer profile.BlockProfile(conf).Start().Stop()
+		defer profile.GoroutineProfile(conf).Start().Stop()
+		defer profile.ThreadCreationProfile(conf).Start().Stop()
+	}
 
 	current := time.Now()
 
-	inputDir := "./input/"
 	files, err := os.ReadDir(inputDir)
 	if err != nil {
 		log.Fatal(err)
@@ -271,10 +311,11 @@ func main() {
 	ioTime := time.Now().Sub(current)
 	current = time.Now()
 
-	baseSize := 4096
-	injectors := RunNWorkers("injectors", len(files), baseSize, nil, nil, nil)
-	splitters := RunNWorkers("splitters", -1, 2*baseSize, injectors.OutputQueue(), nil, nil)
-	collectors := RunNWorkers("collectors", -1, 4*baseSize, splitters.OutputQueue(), nil, &CollectWorkContext{
+	nCpu := runtime.NumCPU()
+	baseSize := 4096 * 2 * 2 * 2
+	injectors := RunNWorkers("injectors", int(math.Max(float64(len(files)), float64(nCpu))), baseSize, nil, nil, nil)
+	splitters := RunNWorkers("splitters", 10*nCpu, 1024*baseSize, injectors.OutputQueue(), nil, nil)
+	collectors := RunNWorkers("collectors", 2, baseSize, splitters.OutputQueue(), nil, &CollectWorkContext{
 		ResultSet: make(map[string]struct{}),
 		mutex:     new(sync.Mutex),
 	}).(*CollectWorkContext)
@@ -294,7 +335,6 @@ func main() {
 	baseInject := time.Now().Sub(current)
 	current = time.Now()
 
-	verbose, stats := false, true
 	injectors.Close(true, true, verbose, stats)
 	injectorsTime := time.Now().Sub(current)
 	current = time.Now()
@@ -307,8 +347,12 @@ func main() {
 
 	closeTime := injectorsTime + splittersTime + collectorsTime
 
-	for k, v := range collectors.ResultSet {
-		fmt.Printf("%v -> %v\n", k, v)
+	for k := range collectors.ResultSet {
+		_, err := outputFile.WriteString(k + "\n")
+		if err != nil {
+			log.Printf("error writing to output file! aborting... err %v", err)
+			break
+		}
 	}
 
 	dumpTime := time.Now().Sub(current)
