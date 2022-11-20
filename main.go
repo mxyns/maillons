@@ -260,7 +260,7 @@ func (c CollectTask) Process(ctx WorkContext) {
 }
 
 var inputDirFlag = flag.String("input", "./input", "input directory")
-var outputFilePathFlag = flag.String("output", "./result.out", "output file location")
+var outputFilePathFlag = flag.String("output", "./maillons.out", "output file location")
 var statsFlag = flag.Bool("stats", false, "true to print statistics at the end")
 var verboseFlag = flag.Bool("verbose", false, "true to print status")
 var profilerOutputPathFlag = flag.String("profile", "", "set profiler output directory to profile program, leave blank for no profiling")
@@ -328,7 +328,7 @@ func main() {
 		injectors.InputQueue() <- FileTask{
 			FilePath:  path,
 			Separator: "|",
-			KeepIndex: 1,
+			KeepIndex: 5,
 		}
 	}
 
